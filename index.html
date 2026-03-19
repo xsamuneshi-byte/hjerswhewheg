@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>3D Horror FPS - Apartment Escape</title>
+    <title>3D Horror FPS - Space to Start</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
         #crosshair {
@@ -18,6 +18,7 @@
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             color: white; text-align: center; background: rgba(0,0,0,0.8);
             padding: 20px; border: 1px solid #ff0000; cursor: pointer;
+            z-index: 10;
         }
     </style>
 </head>
@@ -27,7 +28,7 @@
     <div id="crosshair"></div>
     <div id="instructions">
         <h1>APARTMENT ESCAPE</h1>
-        <p>クリックして開始</p>
+        <p>【スペースキー】またはクリックで開始</p>
         <p>(W,A,S,D: 移動 | マウス: 視点 | クリック: 射撃)</p>
     </div>
 
@@ -35,4 +36,164 @@
         {
             "imports": {
                 "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+
+        let scene, camera, renderer, controls;
+        let bullets = [], zombies = [], walls = [];
+        let score = 0;
+        const clock = new THREE.Clock();
+
+        const map = [
+            [1,1,1,1,1,1,1,1,1,1],
+            [1,2,0,0,1,0,0,0,0,1],
+            [1,1,1,0,1,0,1,1,0,1],
+            [1,0,0,0,0,0,1,0,0,1],
+            [1,0,1,1,1,1,1,0,1,1],
+            [1,0,0,0,0,0,0,0,0,1],
+            [1,1,1,1,0,1,1,1,0,1],
+            [1,0,0,0,0,1,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1],
+        ];
+        const UNIT_SIZE = 5;
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020202);
+            scene.fog = new THREE.FogExp2(0x020202, 0.15);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+            const flashlight = new THREE.SpotLight(0xffffff, 50, 20, Math.PI * 0.1, 0.5, 1);
+            camera.add(flashlight);
+            flashlight.target = new THREE.Object3D();
+            camera.add(flashlight.target);
+            flashlight.target.position.set(0, 0, -1);
+            scene.add(camera);
+
+            scene.add(new THREE.AmbientLight(0x404040, 0.2));
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            controls = new PointerLockControls(camera, document.body);
+            const instructions = document.getElementById('instructions');
+            
+            // クリックでの開始も維持
+            instructions.addEventListener('click', () => controls.lock());
+            
+            controls.addEventListener('lock', () => instructions.style.display = 'none');
+            controls.addEventListener('unlock', () => instructions.style.display = 'block');
+
+            // マップ生成
+            const wallGeo = new THREE.BoxGeometry(UNIT_SIZE, UNIT_SIZE, UNIT_SIZE);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.MeshStandardMaterial({ color: 0x111111 }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            for(let z=0; z<map.length; z++){
+                for(let x=0; x<map[z].length; x++){
+                    if(map[z][x] === 1) {
+                        const wall = new THREE.Mesh(wallGeo, wallMat);
+                        wall.position.set(x * UNIT_SIZE, UNIT_SIZE/2, z * UNIT_SIZE);
+                        scene.add(wall);
+                        walls.push(wall);
+                    } else if(map[z][x] === 2) {
+                        camera.position.set(x * UNIT_SIZE, 1.6, z * UNIT_SIZE);
+                    }
+                }
+            }
+
+            setInterval(spawnZombie, 3000);
+            window.addEventListener('click', shoot);
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function spawnZombie() {
+            if (!controls.isLocked) return;
+            const zombie = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), new THREE.MeshStandardMaterial({ color: 0x336633 }));
+            zombie.position.set(Math.random() * 40, 0.9, Math.random() * 40);
+            scene.add(zombie);
+            zombies.push(zombie);
+        }
+
+        function shoot() {
+            if (!controls.isLocked) return;
+            const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+            bullet.position.copy(camera.position);
+            const direction = new THREE.Vector3();
+            camera.getWorldDirection(direction);
+            bullet.velocity = direction.multiplyScalar(0.5);
+            scene.add(bullet);
+            bullets.push(bullet);
+            setTimeout(() => { scene.remove(bullet); bullets = bullets.filter(b => b !== bullet); }, 2000);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        const moveData = { forward: false, backward: false, left: false, right: false };
+        document.addEventListener('keydown', (e) => {
+            // スペースキーで開始する処理を追加
+            if (e.code === 'Space' && !controls.isLocked) {
+                controls.lock();
+            }
+            if(e.code === 'KeyW') moveData.forward = true;
+            if(e.code === 'KeyS') moveData.backward = true;
+            if(e.code === 'KeyA') moveData.left = true;
+            if(e.code === 'KeyD') moveData.right = true;
+        });
+        document.addEventListener('keyup', (e) => {
+            if(e.code === 'KeyW') moveData.forward = false;
+            if(e.code === 'KeyS') moveData.backward = false;
+            if(e.code === 'KeyA') moveData.left = false;
+            if(e.code === 'KeyD') moveData.right = false;
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (controls.isLocked) {
+                const speed = 5 * delta;
+                if(moveData.forward) controls.moveForward(speed);
+                if(moveData.backward) controls.moveForward(-speed);
+                if(moveData.left) controls.moveRight(-speed);
+                if(moveData.right) controls.moveRight(speed);
+
+                bullets.forEach((b, bIdx) => {
+                    b.position.add(b.velocity);
+                    zombies.forEach((z, zIdx) => {
+                        if(b.position.distanceTo(z.position) < 1) {
+                            scene.remove(z); zombies.splice(zIdx, 1);
+                            scene.remove(b); bullets.splice(bIdx, 1);
+                            score++; document.getElementById('score').innerText = score;
+                        }
+                    });
+                });
+
+                zombies.forEach(z => {
+                    const dir = new THREE.Vector3().subVectors(camera.position, z.position).normalize();
+                    z.position.x += dir.x * 0.02;
+                    z.position.z += dir.z * 0.02;
+                    z.lookAt(camera.position.x, 0.9, camera.position.z);
+                });
+            }
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
